@@ -100,6 +100,18 @@ echo "$urls" | while read -r url; do
     fi
 done
 
+# Download .errors_attachment.url files
+ERRORS_URLS=$(echo "$IMPORT_DETAILS" | jq -r '.[] | select(.errors_attachment != null) | .errors_attachment.url' | grep -v null || true)
+
+if [ -n "$ERRORS_URLS" ]; then
+  echo "$ERRORS_URLS" | while read -r url; do
+    if [ -n "$url" ]; then
+      curl -s -H "Authorization: Bearer $TOKEN" --remote-header-name --remote-name --output-dir "$OUTPUT_FOLDER" "$url"
+      echo "Downloaded errors_attachment file from URL: $url"
+    fi
+  done
+fi
+
 # Create a ZIP archive of all non-JSON files
 ZIP_NAME="imports_and_errors_$TODAY.zip"
 echo "Creating ZIP file $ZIP_NAME excluding JSON files..."
