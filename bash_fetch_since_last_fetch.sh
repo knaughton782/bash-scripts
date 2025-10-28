@@ -1,3 +1,4 @@
+
 #!/bin/bash
 
 # File to store the last fetch time
@@ -28,15 +29,15 @@ if [ -d "$OUTPUT_FOLDER" ]; then
 fi
 
 # Canvas API credentials
-TOKEN="put valid user token here"
-BASE_URL="put valid canvas api endpoint here"
+TOKEN="put your token here"
+BASE_URL="Your-INSTITUTION-URL-HEre/sis_imports"
 
 
-# Default to 2 days ago if timestamp file doesn't exist
+# Default to 3 days ago if timestamp file doesn't exist
 if [[ -f "$TIMESTAMP_FILE" ]]; then
     SINCE=$(cat "$TIMESTAMP_FILE")
 else
-    SINCE=$(date -u -v-2d +"%Y-%m-%dT%H:%M:%SZ")  # macOS-compatible UTC time 2 days ago
+    SINCE=$(date -u -v-3d +"%Y-%m-%dT%H:%M:%SZ")  # macOS-compatible UTC time 3 days ago
 fi
 
 echo "Fetching data since $SINCE..."
@@ -69,51 +70,66 @@ rm "$TMPFILE"
 # Update timestamp for next fetch (current UTC time)
 date -u +"%Y-%m-%dT%H:%M:%SZ" > "$TIMESTAMP_FILE"
 
+
 echo "Parsing $OUTFILE for URLs and downloading associated files..."
+IMPORT_DETAILS=$(cat "$OUTFILE")
 
-urls=$(jq -r '
-  .[]?
-  | select(.csv_attachments and (.csv_attachments | length > 0))
-  | .csv_attachments[]
-  | .url
-' "$OUTFILE")
 
-if [ -z "$urls" ]; then
-    note_file="${OUTFILE%.json}_NO_FILES_FOUND.txt"
-    echo "No downloadable URLs found." > "$note_file"
-    echo "No attachments found. Logged to $note_file."
-    exit 0
-fi
+#
+# Download .csv_attachments[] files with unique filenames
+echo "$IMPORT_DETAILS" | jq -c '.[] | select(.csv_attachments and (.csv_attachments | length > 0)) | .csv_attachments[]' | while read -r row; do
+  # echo "Raw attachment row: $row"
+  ATTACHMENT_URL=$(echo "$row" | jq -r '.url')
+  ATTACHMENT_NAME=$(echo "$row" | jq -r '.display_name')
 
-echo "$urls" | while read -r url; do
-    if [[ -n "$url" ]]; then
-        display_name=$(jq -r --arg url "$url" '
-          .[]?
-          | select(.csv_attachments and (.csv_attachments | length > 0))
-          | .csv_attachments[]
-          | select(.url == $url)
-          | .display_name
-        ' "$OUTFILE")
-        filename="${display_name:-$(basename "$url")}"
-        curl -s -L -H "Authorization: Bearer $TOKEN" "$url" -o "$OUTPUT_FOLDER/$filename"
-        echo "Downloaded $filename to $OUTPUT_FOLDER"
-    fi
+
+  # Ensure unique filename by appending a, b, etc. if needed (no underscore)
+  BASENAME="${ATTACHMENT_NAME%.*}"
+  EXTENSION="${ATTACHMENT_NAME##*.}"
+  SUFFIX=""
+  COUNTER=97  # ASCII 'a'
+
+  while [[ -e "$OUTPUT_FOLDER/${BASENAME}${SUFFIX}.$EXTENSION" ]]; do
+    SUFFIX=$(printf \\$(printf '%03o' $COUNTER))
+    ((COUNTER++))
+  done
+
+  UNIQUE_FILENAME="${BASENAME}${SUFFIX}.$EXTENSION"
+
+  echo "Trying to download: $ATTACHMENT_URL"
+  curl -sSL -H "Authorization: Bearer $TOKEN" "$ATTACHMENT_URL" -o "$OUTPUT_FOLDER/$UNIQUE_FILENAME"
+  echo "Downloaded attachment: $UNIQUE_FILENAME"
 done
 
-# Download .errors_attachment.url files
-ERRORS_URLS=$(echo "$IMPORT_DETAILS" | jq -r '.[] | select(.errors_attachment != null) | .errors_attachment.url' | grep -v null || true)
+# Download .errors_attachment.url files with assigned names
+echo "$IMPORT_DETAILS" | jq -c '.[] | select(.errors_attachment != null)' | while read -r item; do
+  ERRORS_URL=$(echo "$item" | jq -r '.errors_attachment.url')
+  IMPORT_ID=$(echo "$item" | jq -r '.id')
+  CSV_BASE_NAMES=$(echo "$item" | jq -r '.csv_attachments[]?.display_name' | sed 's/\.[^.]*$//' | paste -sd "-" -)
+  ERROR_FILE_NAME="sis_errors_${IMPORT_ID}_${CSV_BASE_NAMES}.csv"
 
-if [ -n "$ERRORS_URLS" ]; then
-  echo "$ERRORS_URLS" | while read -r url; do
-    if [ -n "$url" ]; then
-      curl -s -H "Authorization: Bearer $TOKEN" --remote-header-name --remote-name --output-dir "$OUTPUT_FOLDER" "$url"
-      echo "Downloaded errors_attachment file from URL: $url"
-    fi
-  done
-fi
+  if [ -n "$ERRORS_URL" ] && [ "$ERRORS_URL" != "null" ]; then
+    echo "Trying to download error file: $ERROR_FILE_NAME from $ERRORS_URL"
 
-# Create a ZIP archive of all non-JSON files
+    BASENAME="${ERROR_FILE_NAME%.*}"
+    EXTENSION="${ERROR_FILE_NAME##*.}"
+    SUFFIX=""
+    COUNTER=97  # ASCII 'a'
+
+    while [[ -e "$OUTPUT_FOLDER/${BASENAME}${SUFFIX}.$EXTENSION" ]]; do
+      SUFFIX=$(printf \\$(printf '%03o' $COUNTER))
+      ((COUNTER++))
+    done
+
+    UNIQUE_FILENAME="${BASENAME}${SUFFIX}.$EXTENSION"
+
+    curl -sSL -H "Authorization: Bearer $TOKEN" "$ERRORS_URL" -o "$OUTPUT_FOLDER/$UNIQUE_FILENAME"
+    echo "Downloaded errors_attachment: $UNIQUE_FILENAME"
+  fi
+done
+
+# Create a ZIP archive of all CSV files only
 ZIP_NAME="imports_and_errors_$TODAY.zip"
-echo "Creating ZIP file $ZIP_NAME excluding JSON files..."
-(cd "$OUTPUT_FOLDER" && zip -r "$ZIP_NAME" . -x "*.json")
+echo "Creating ZIP file $ZIP_NAME with only CSV files..."
+zip -j "$OUTPUT_FOLDER/$ZIP_NAME" "$OUTPUT_FOLDER"/*.csv 2>/dev/null
 echo "ZIP file created at $OUTPUT_FOLDER/$ZIP_NAME"
