@@ -1,13 +1,28 @@
 #!/bin/bash
 
+# Load environment variables from .env file
+set -o allexport
+source .env
+set +o allexport
 
-# Output file and folder for this fetch
+# Get today's date in YYYY-MM-DD format
 TODAY=$(date +"%Y-%m-%d")
-OUTPUT_FOLDER="./COURSE-LISTS"
+
+# Canvas API credentials
+TOKEN="$CANVAS_TOKEN"
+SUBACCOUNT_ID="$SUBACCOUNT_ID"
+BASE_URL="$BASE_DOMAIN/api/v1/accounts/$SUBACCOUNT_ID/courses"
+COURSE_CSV="courses_list_$TODAY.csv"
+
+
+# Set OUTPUT_FOLDER to one level above the script's directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+OUTPUT_FOLDER="${SCRIPT_DIR}/../COURSE-LISTS"
+
 mkdir -p "$OUTPUT_FOLDER"
 
 # Generate unique output filename to avoid overwrite
-base_name="courses_$(date +%F)"
+base_name="courses_list_$(date +%F)"
 extension=".json"
 OUTFILE="$OUTPUT_FOLDER/${base_name}${extension}"
 
@@ -23,15 +38,10 @@ if [ -d "$OUTPUT_FOLDER" ]; then
     echo "Folder $OUTPUT_FOLDER already exists. Saving file inside it..."
 fi
 
-# Canvas API credentials
-TOKEN="put token here"
-# master course subaccount ID 
-SUBACCOUNT_ID="put subaccount ID here"
-BASE_URL="https://YOUR-INSTITUTION/api/v1/accounts/$SUBACCOUNT_ID/courses"
-COURSE_CSV="courses_$TODAY.csv"
+
 
 echo "Fetching courses from subaccount $SUBACCOUNT_ID..."
-
+echo "Saving output to parent directory: $OUTPUT_FOLDER"
 TMPFILE="$OUTPUT_FOLDER/tmp_courses.json"
 > "$TMPFILE"
 
@@ -63,7 +73,7 @@ COURSE_COUNT=$(jq 'length' "$OUTFILE")
 echo "Fetched $COURSE_COUNT courses. JSON saved to $OUTFILE and CSV saved to $OUTPUT_FOLDER/$COURSE_CSV."
 
 # Fetch CSV attachments and errors attachments URLs and download them
-IMPORTS_URL="https://YOUR-INSTITUTION/api/v1/accounts/$SUBACCOUNT_ID/imports"
+IMPORTS_URL="$BASE_DOMAIN/api/v1/accounts/$SUBACCOUNT_ID/imports"
 IMPORTS_JSON="$OUTPUT_FOLDER/imports.json"
 curl -s -H "Authorization: Bearer $TOKEN" "$IMPORTS_URL" > "$IMPORTS_JSON"
 
@@ -83,3 +93,5 @@ for url in "${urls[@]}"; do
 done
 
 rm "$IMPORTS_JSON"
+
+echo "Files saved: $OUTFILE (JSON), $OUTPUT_FOLDER/$COURSE_CSV (CSV)"

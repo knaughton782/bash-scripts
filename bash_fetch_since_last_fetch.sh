@@ -1,5 +1,13 @@
-
 #!/bin/bash
+
+# Load environment variables from .env file
+set -o allexport
+source .env
+set +o allexport
+
+# Canvas API credentials
+TOKEN="$CANVAS_TOKEN"
+BASE_URL="$BASE_DOMAIN/api/v1/accounts/$ACCOUNT_ID/sis_imports"
 
 # File to store the last fetch time
 TIMESTAMP_FILE="last_fetch_timestamp.txt"
@@ -8,7 +16,7 @@ TIMESTAMP_FILE="last_fetch_timestamp.txt"
 TODAY=$(date +"%Y-%m-%d")
 
 # Create a dated output folder
-OUTPUT_FOLDER="./$TODAY"
+OUTPUT_FOLDER="../$TODAY"
 mkdir -p "$OUTPUT_FOLDER"
 
 # Generate unique output filename to avoid overwrite
@@ -28,9 +36,7 @@ if [ -d "$OUTPUT_FOLDER" ]; then
     echo "Folder $OUTPUT_FOLDER already exists. Saving file inside it..."
 fi
 
-# Canvas API credentials
-TOKEN="put your token here"
-BASE_URL="Your-INSTITUTION-URL-HEre/sis_imports"
+
 
 
 # Default to 3 days ago if timestamp file doesn't exist
